@@ -1,9 +1,9 @@
-# app/main.py
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from typing import Optional
 import json
 import uvicorn
 import time
+import requests
 
 from app.config import (
     SUPABASE_URL, SUPABASE_KEY, STUDENT_BUCKET,
@@ -34,7 +34,7 @@ def health():
 def recognize_upload(
     session_id: str = Form(...),
     enrolled: str = Form(...),
-    file: UploadFile = File(...),
+    image_url: str = Form(...),
     image_name: Optional[str] = Form(None)
 ):
 
@@ -42,17 +42,30 @@ def recognize_upload(
     try:
         enrolled_list = json.loads(enrolled)
         if not isinstance(enrolled_list, list):
-            raise
-    except:
-        enrolled_list = [x.strip().lower() for x in enrolled.split(",") if x.strip()]
+            raise ValueError("enrolled must be a list or comma-separated string")
+    except Exception:
+        enrolled_list = [x.strip() for x in enrolled.split(",") if x.strip()]
 
-    enrolled_list = [x.lower() for x in enrolled_list]
+    # Normalize to lowercase strings (safely handle non-string items)
+    normalized = []
+    for item in enrolled_list:
+        try:
+            s = str(item).strip().lower()
+            if s:
+                normalized.append(s)
+        except Exception:
+            continue
+    enrolled_list = normalized
 
-    # Read classroom image bytes
+    # Fetch classroom image from URL
     try:
-        frame_bytes = file.file.read()
-    except:
-        raise HTTPException(400, "Cannot read uploaded file")
+        response = requests.get(image_url, timeout=10)
+        response.raise_for_status()
+        frame_bytes = response.content
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(400, f"Cannot fetch image from URL: {str(e)}")
+    except Exception as e:
+        raise HTTPException(400, f"Error reading image from URL: {str(e)}")
 
     # Build embeddings for only these students
     try:
