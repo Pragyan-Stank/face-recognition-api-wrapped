@@ -7,7 +7,7 @@ import requests
 
 from app.config import (
     SUPABASE_URL, SUPABASE_KEY, STUDENT_BUCKET,
-    USE_GPU, DET_SIZE, SIMILARITY_THRESHOLD, DET_CONF_THRESHOLD
+    USE_GPU, DET_SIZE, SIMILARITY_THRESHOLD, DET_CONF_THRESHOLD, SUPABASE_SERVICE_ROLE_KEY
 )
 
 from app.services.supabase_service import SupabaseService
@@ -15,7 +15,7 @@ from app.services.face_service import FaceService
 
 app = FastAPI(title="Face Attendance API")
 
-supa = SupabaseService(SUPABASE_URL, SUPABASE_KEY)
+supa = SupabaseService(SUPABASE_URL, SUPABASE_KEY, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
 
 face_svc = FaceService(
     supa,
@@ -78,22 +78,32 @@ def recognize_upload(
     try:
         recog_result = face_svc.recognize_frame(frame_bytes, names_arr, embs_arr)
 
-        # Case A: returned a (recognized, similarity_map) tuple/list
-        if isinstance(recog_result, (tuple, list)) and len(recog_result) == 2:
-            recognized, similarity_map = recog_result
+        total_present = 0  # default in case something unexpected happens later
+
+        # Case A: tuple/list
+        if isinstance(recog_result, (tuple, list)):
+            if len(recog_result) == 3:
+                # recognized, similarity_map, total_present
+                recognized, similarity_map, total_present = recog_result
+            elif len(recog_result) == 2:
+                # recognized, similarity_map
+                recognized, similarity_map = recog_result
+                total_present = len(recognized)
+            else:
+                raise ValueError(f"Unexpected tuple/list length from recognize_frame: {len(recog_result)}")
 
         # Case B: returned only a dict -> treat it as similarity_map
         elif isinstance(recog_result, dict):
             similarity_map = recog_result
-            # threshold to decide "recognized"; prefer service threshold if available
             sim_threshold = getattr(face_svc, "sim_threshold", SIMILARITY_THRESHOLD)
-            # recognized are those with similarity >= threshold
             recognized = [name for name, sim in similarity_map.items() if (sim or 0.0) >= sim_threshold]
+            total_present = len(recognized)
 
         # Case C: returned only a list -> treat as recognized names
         elif isinstance(recog_result, list):
             recognized = recog_result
             similarity_map = {name: (1.0 if name in recognized else 0.0) for name in enrolled_list}
+            total_present = len(recognized)
 
         else:
             raise ValueError(f"Unexpected return from recognize_frame: {type(recog_result)}")
@@ -104,6 +114,7 @@ def recognize_upload(
     attendance = {}
     for r in enrolled_list:
         status = "present" if r in recognized else "absent"
+        # current similarity_map values are cosine scores like 0.8; keep same behavior as before
         similarity = round(float(similarity_map.get(r, 0.0)), 2)
         attendance[r] = {
             "status": status,
@@ -123,6 +134,7 @@ def recognize_upload(
         "image_name": image_name,
         "attendance": attendance,
         "recognized_summary": recognized,
+        "total_present": total_present
     }
 
 if __name__ == "__main__":

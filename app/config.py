@@ -6,6 +6,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 STUDENT_BUCKET = os.getenv("STUDENT_IMAGES_BUCKET", "student-images")
 FRAMES_BUCKET = os.getenv("CLASSROOM_FRAMES_BUCKET", "classroom-frames")
 

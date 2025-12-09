@@ -150,6 +150,7 @@ class FaceService:
             name for name, sim in max_sims.items()
             if sim >= float(self.sim_threshold)
         ]
+        total_present = len(recognized)
 
-        return recognized, max_sims
+        return recognized, max_sims,total_present
 
