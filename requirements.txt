@@ -9,5 +9,5 @@ opencv-python-headless
 numpy
 pillow
 tqdm
-multipart
+python-multipart
 gunicorn==21.2.0
