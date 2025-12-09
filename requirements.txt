@@ -10,3 +10,4 @@ numpy
 pillow
 tqdm
 multipart
+gunicorn==21.2.0
