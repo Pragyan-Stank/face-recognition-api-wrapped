@@ -11,7 +11,7 @@ FRAMES_BUCKET = os.getenv("CLASSROOM_FRAMES_BUCKET", "classroom-frames")
 
 USE_GPU = os.getenv("USE_GPU", "true").lower() in ("1", "true", "yes")
 DET_SIZE = int(os.getenv("DETECTION_SIZE", "1024"))
-SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.55"))
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.40"))
 DET_CONF_THRESHOLD = float(os.getenv("DET_CONF_THRESHOLD", "0.25"))
 
 # sanity check

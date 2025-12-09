@@ -99,29 +99,57 @@ class FaceService:
 
     def recognize_frame(self, frame_bytes, names_arr, embs_arr):
         """
-        Recognize faces in classroom image using given embeddings.
+        Recognize faces in a frame (bytes) against enrolled embeddings.
         """
-        img_bgr = bytes_to_bgr_image(frame_bytes)
+
+        # Make sure face analysis is initialized
+        self.init_face_app()
+
+        # Step 1: Decode image bytes
+        nparr = np.frombuffer(frame_bytes, np.uint8)
+        img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img_bgr is None:
-            raise RuntimeError("Failed to decode classroom image.")
+            raise ValueError("Could not decode image bytes")
 
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        # Step 2: Face detection using InsightFace
         faces = self.fa.get(img_rgb)
-        faces = [f for f in faces if getattr(f,"det_score",1.0) >= self.det_conf_threshold]
+        if not faces:
+            # No faces → everyone absent with 0 similarity
+            return [], {str(n): 0.0 for n in names_arr}
 
-        recognized = {}
+        # Convert reference embeddings to numpy
+        names_list = list(names_arr)
+        ref_embs = np.asarray(embs_arr, dtype=np.float32)
 
-        for f in faces:
-            emb = np.asarray(f.embedding, dtype=np.float32)
+        # Normalize reference embeddings
+        ref_embs = ref_embs / (np.linalg.norm(ref_embs, axis=1, keepdims=True) + 1e-10)
+
+        # Track similarity scores
+        max_sims = {str(n): 0.0 for n in names_list}
+
+        # Step 3: For each detected face
+        for face in faces:
+
+            emb = np.asarray(face.embedding, dtype=np.float32)
+            if emb.size == 0:
+                continue
+
             emb = emb / (np.linalg.norm(emb) + 1e-10)
 
-            sims = np.dot(embs_arr, emb)
-            idx = int(np.argmax(sims))
-            score = float(sims[idx])
+            sims = np.dot(ref_embs, emb)
 
-            if score >= self.sim_threshold:
-                name = names_arr[idx].lower()
-                if name not in recognized or recognized[name] < score:
-                    recognized[name] = score
+            for i, name in enumerate(names_list):
+                sim = float(sims[i])
+                if sim > max_sims[str(name)]:
+                    max_sims[str(name)] = sim
 
-        return recognized
+        # Step 4: Filter recognized based on threshold
+        recognized = [
+            name for name, sim in max_sims.items()
+            if sim >= float(self.sim_threshold)
+        ]
+
+        return recognized, max_sims
+

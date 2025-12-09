@@ -38,59 +38,83 @@ def recognize_upload(
     image_name: Optional[str] = Form(None)
 ):
 
-    # Parse enrolled list
     try:
         enrolled_list = json.loads(enrolled)
         if not isinstance(enrolled_list, list):
-            raise ValueError("enrolled must be a list or comma-separated string")
+            raise ValueError()
     except Exception:
         enrolled_list = [x.strip() for x in enrolled.split(",") if x.strip()]
 
-    # Normalize to lowercase strings (safely handle non-string items)
-    normalized = []
-    for item in enrolled_list:
-        try:
-            s = str(item).strip().lower()
-            if s:
-                normalized.append(s)
-        except Exception:
-            continue
-    enrolled_list = normalized
+    enrolled_list = [str(x).strip().lower() for x in enrolled_list]
 
-    # Fetch classroom image from URL
     try:
         response = requests.get(image_url, timeout=10)
         response.raise_for_status()
         frame_bytes = response.content
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(400, f"Cannot fetch image from URL: {str(e)}")
     except Exception as e:
-        raise HTTPException(400, f"Error reading image from URL: {str(e)}")
+        raise HTTPException(400, f"Cannot fetch image: {str(e)}")
 
-    # Build embeddings for only these students
+    # Build embeddings (be defensive about return shape)
     try:
-        names_arr, embs_arr = face_svc.build_embeddings_for_students(enrolled_list)
+        embeds_result = face_svc.build_embeddings_for_students(enrolled_list)
+        # Normalize build_embeddings_for_students return
+        if isinstance(embeds_result, (tuple, list)) and len(embeds_result) == 2:
+            names_arr, embs_arr = embeds_result
+        elif isinstance(embeds_result, dict):
+            # dict of name -> embedding
+            names_arr = list(embeds_result.keys())
+            embs_arr = [embeds_result[n] for n in names_arr]
+        elif isinstance(embeds_result, list):
+            # perhaps it's a list of embeddings aligned with enrolled_list
+            names_arr = enrolled_list
+            embs_arr = embeds_result
+        else:
+            raise ValueError(f"Unexpected return from build_embeddings_for_students: {type(embeds_result)}")
     except Exception as e:
-        raise HTTPException(500, str(e))
+        # give a clear message and log for debugging
+        raise HTTPException(500, f"Error building embeddings: {str(e)}")
 
-    # Perform recognition
+    # NOW RETURNS similarity scores (defensive handling for multiple possible return types)
     try:
-        recognized = face_svc.recognize_frame(frame_bytes, names_arr, embs_arr)
-    except Exception as e:
-        raise HTTPException(500, str(e))
+        recog_result = face_svc.recognize_frame(frame_bytes, names_arr, embs_arr)
 
-    # Build attendance response
+        # Case A: returned a (recognized, similarity_map) tuple/list
+        if isinstance(recog_result, (tuple, list)) and len(recog_result) == 2:
+            recognized, similarity_map = recog_result
+
+        # Case B: returned only a dict -> treat it as similarity_map
+        elif isinstance(recog_result, dict):
+            similarity_map = recog_result
+            # threshold to decide "recognized"; prefer service threshold if available
+            sim_threshold = getattr(face_svc, "sim_threshold", SIMILARITY_THRESHOLD)
+            # recognized are those with similarity >= threshold
+            recognized = [name for name, sim in similarity_map.items() if (sim or 0.0) >= sim_threshold]
+
+        # Case C: returned only a list -> treat as recognized names
+        elif isinstance(recog_result, list):
+            recognized = recog_result
+            similarity_map = {name: (1.0 if name in recognized else 0.0) for name in enrolled_list}
+
+        else:
+            raise ValueError(f"Unexpected return from recognize_frame: {type(recog_result)}")
+    except Exception as e:
+        raise HTTPException(500, f"{str(e)}")
+
+    # Build attendance with similarity %
     attendance = {}
     for r in enrolled_list:
-        attendance[r] = "present" if r in recognized else "absent"
+        status = "present" if r in recognized else "absent"
+        similarity = round(float(similarity_map.get(r, 0.0)), 2)
+        attendance[r] = {
+            "status": status,
+            "similarity_percent": similarity
+        }
 
-    # Print to terminal
     print("\n--- Attendance (Session:", session_id, ") ---")
-    for k,v in attendance.items():
+    for k, v in attendance.items():
         print(k, ":", v)
     print("--------------------------------------------\n")
 
-    # Generate image name if not provided
     if not image_name:
         image_name = f"CR000_{int(time.time())}"
 
@@ -102,4 +126,4 @@ def recognize_upload(
     }
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)
