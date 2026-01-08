@@ -1,4 +1,4 @@
-# Face Attendance API (FastAPI + InsightFace)
+# Face Recognition based Attendance System
 
 ### Overview
 
